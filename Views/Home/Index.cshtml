@@ -1,0 +1,82 @@
+﻿@model ZennoLab.Models.ImageSetViewModel
+@{
+    ViewData["Title"] = "Home Page";
+}
+
+    <div class="text-left">
+        <h1 class="display-4">Loading archives</h1>
+        <form asp-action="AddImageSet" asp-controller="Home" method="post" enctype="multipart/form-data">
+            <input asp-for="Title" class="form-control-sm" />
+            <label>Имя</label>
+            <br>
+
+            <input type="checkbox" asp-for="IsCyrContains" />
+            <label>Содержит кириллицу</label>
+            <br>
+
+            <input type="checkbox" asp-for="IsLatContains" />
+            <label>Содержит латиницу</label>
+            <br>
+
+            <input type="checkbox" asp-for="IsNumContains" />
+            <label>Содержит цифры</label>
+            <br>
+
+            <input type="checkbox" asp-for="IsScharContains" />
+            <label>Содержит специальные символы</label>
+            <br>
+
+            <input type="checkbox" asp-for="IsCaseSens" />
+            <label>Чувствительность к регистру</label>
+            <br>
+
+            <select class="form-control-sm" asp-for="AnswersLocation">
+                <option value="WithoutAnswers">Отсутствует</option>
+                <option value="InFileNames">В именах файлов</option>
+                <option value="InDetachedFile">В отдельном файле</option>
+            </select>
+            <label>Расположение ответов</label>
+            <br>
+
+            <input type="file" asp-for="Archive" />
+            <br><br>
+            <input type="submit" value="Загрузить" />
+        </form>
+        <br><br>
+
+        @if (Model.ValidationErrors.Any())
+        {
+            <p style="color: red">Обнаружены ошибки при заполнении формы:</p>
+        }
+        <table class="table">
+            @foreach (var errorItem in Model.ValidationErrors)
+            {
+                <tr>
+                    <td style="color: red">@errorItem</td>
+                </tr>
+            }
+        </table>
+        <br><br>
+
+        <table class="table">
+            <tr>
+                <th>Имя</th>
+                <th>Дата создания</th>
+                <th>Путь к архиву</th>
+                <th> </th>
+            </tr>
+            @foreach (var item in Model.AllSets)
+            {
+                <tr>
+                    <td>@item.Title</td>
+                    <td>@item.CreateDate.ToString("dd.MM.yyyy HH:mm:ss")</td>
+                    <td>@item.ArchivePath</td>
+                    <td>
+                        <a asp-action="Details" asp-controller="Home" asp-route-id="@item.Id">Подробнее</a> |
+                        <a asp-action="Edit" asp-controller="Home" asp-route-id="@item.Id">Изменить</a> |
+                        <a asp-action="Delete" asp-controller="Home" asp-route-id="@item.Id">Удалить</a>
+                    </td>
+                </tr>
+            }
+        </table>
+    </div>
