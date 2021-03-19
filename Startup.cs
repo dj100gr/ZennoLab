@@ -1,15 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.EntityFrameworkCore;
-using ZennoLab.Models;
+using ZennoLab.Storages.MSSQL;
+using ZennoLab.Infrastructure;
 
 namespace ZennoLab
 {
@@ -28,13 +24,16 @@ namespace ZennoLab
             services.AddControllersWithViews();
             
             string con = Configuration.GetConnectionString("DefaultConnection");
-            services.AddDbContext<SqlContext>(options => options.UseSqlServer(con));
+           
             services.AddControllersWithViews();
 
             services.Configure<IISServerOptions>(options =>
             {
                 options.MaxRequestBodySize = int.MaxValue;
             });
+
+            services.AddDbContext<ImageSetsContext>(options => options.UseSqlServer(con));
+            services.AddScoped<IImageSetsRepository, ImageSetsRepository>();
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
