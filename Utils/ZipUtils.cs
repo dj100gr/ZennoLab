@@ -1,70 +1,155 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.IO.Compression;
-using System.IO.Packaging;
 using System.Linq;
-using System.Reflection;
 using System.Text;
+using ZennoLab.Infrastructure;
 
 namespace ZennoLab.Utils
 {
     public class ZipReader
     {
-        public bool IsZipArchive(string zipPath)
+        public ZipReader()
         {
-            if (zipPath is null)
+            ErrorsList = new List<string>();
+            FileList = new List<string>();
+            FilesCount = 0;
+            FilePath = string.Empty;
+        }
+
+        public ZipReader(IImageSet model)
+        {
+            ErrorsList = new List<string>();
+            FileList = new List<string>();
+            FilesCount = 0;
+            FilePath = string.Empty;
+            GetErrors(model);
+        }
+
+        private string FilePath { get; set; }
+
+        public List<string> ErrorsList { get; set; }
+
+        private List<string> FileList { get; set; }
+
+        private int FilesCount { get; set; }
+
+        private void GetErrors(IImageSet model)
+        {     
+            GetFileList(model.ArchivePath);
+            
+            FilesCount = FileList.Count;
+            if (model.AnswersLocation == "InDetachedFile") FilesCount -= 1;
+
+            if (!IsZipArchive())
+            {
+                ErrorsList.Add("Файл не является zip архивом");
+                return;
+            }
+
+            if (model.AnswersLocation == "InDetachedFile" && !FileList.Contains("answers.txt"))
+            {
+                ErrorsList.Add("В архиве отсутствует файл с ответами");
+                return;
+            }
+           
+            ValidateFilesCount(model);
+
+            if (ErrorsList.Any()) return;
+
+            if (model.AnswersLocation == "InDetachedFile")
+            {
+                if (!FileList.Contains("answers.txt"))
+                {
+                    ErrorsList.Add("В архиве отсутствует файл с ответами");
+                    return;
+                }
+                else
+                {
+                    ValidateAnswersFile();
+                }
+            }
+            return;
+        }
+
+        private bool IsZipArchive()
+        {
+            if (FilePath is null)
             {
                return  false;
             }
             try
             {
-                using (var zipFile = ZipFile.OpenRead(zipPath))
-                {
-                    var entries = zipFile.Entries;
-                    return true;
-                }
+                using var zipFile = ZipFile.OpenRead(FilePath);
+                var entries = zipFile.Entries;
+                return true;
             }
-            catch(Exception e)
+            catch
             {
-                var ee = e.Message;
                 return false;
             }
         }
         
-        public List<string> GetFileList(string zipPath)
+        private void GetFileList(string zipPath)
         {
-            var fileList = new List<string>();
-            if (zipPath is null)
+            FilePath = zipPath;
+            if (FilePath is null)
             {
-                throw new ArgumentNullException(nameof(zipPath));
+                throw new ArgumentNullException(nameof(FilePath));
             }
-            using (ZipArchive zipFile = ZipFile.OpenRead(zipPath))
+            using (ZipArchive zipFile = ZipFile.OpenRead(FilePath))
             {
                 foreach (ZipArchiveEntry zip in zipFile.Entries)
                 {
-                    fileList.Add(zip.FullName);
+                    FileList.Add(zip.FullName);
                 }
             }
-            return fileList;
         }
 
-        public List<string> ValidateAnswersFile(string zipPath, int filesCount)
+        public void ValidateFilesCount(IImageSet model)
         {
-            var errorsList = new List<string>();
-            if (zipPath is null)
+            var minCount = 2000;
+            var maxCount = 3000;
+            if (model.IsCyrContains)
             {
-                throw new ArgumentNullException(nameof(zipPath));
+                minCount += 3000;
+                maxCount += 3000;
             }
-            using (ZipArchive zipFile = ZipFile.OpenRead(zipPath))
+            if (model.IsLatContains)
+            {
+                minCount += 3000;
+                maxCount += 3000;
+            }
+            if (model.IsNumContains)
+            {
+                minCount += 3000;
+                maxCount += 3000;
+            }
+            if (model.IsScharContains)
+            {
+                minCount += 3000;
+                maxCount += 3000;
+            }
+            if (model.IsCaseSens)
+            {
+                minCount += 3000;
+                maxCount += 3000;
+            }
+            if (FilesCount < minCount || FilesCount > maxCount)
+            {
+                ErrorsList.Add($"При данных настройках архив может содержать от {minCount} до {maxCount} картинок");
+            }
+        }
+
+        public void ValidateAnswersFile()
+        {
+            if (FilePath is null)
+            {
+                throw new ArgumentNullException(nameof(FilePath));
+            }
+            using (ZipArchive zipFile = ZipFile.OpenRead(FilePath))
             {
                 var answers = zipFile.GetEntry("answers.txt");
-                if (answers == null)
-                {
-                    errorsList.Add("В архиве отсутствует файл с ответами");
-                    return errorsList;
-                }
                 byte[] answersBytes = new byte[answers.Length];
                 using (var zipEntryStream = answers.Open())
                 {
@@ -74,13 +159,11 @@ namespace ZennoLab.Utils
                 var answersList = answersStr.Split("\n");
                 var nonEmptyAnswersList = answersList.Where(i => !String.IsNullOrEmpty(i));
 
-                if (nonEmptyAnswersList.Count() != filesCount)
+                if (nonEmptyAnswersList.Count() != FilesCount)
                 {
-                    errorsList.Add("Количество ответов не совпадает с количеством файлов в архиве");
-                    return errorsList;
+                    ErrorsList.Add("Количество ответов не совпадает с количеством файлов в архиве");
                 }
             }
-            return errorsList;
         }
     }
 }

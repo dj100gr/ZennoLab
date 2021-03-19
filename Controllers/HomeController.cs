@@ -1,30 +1,29 @@
-﻿using System.Diagnostics;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using ZennoLab.Models;
-using Microsoft.AspNetCore.Http;
+﻿using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.IO;
 using System.ComponentModel.DataAnnotations;
-using Microsoft.EntityFrameworkCore;
-using System;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using System.Collections.Generic;
+using ZennoLab.Models;
 using ZennoLab.Utils;
+using ZennoLab.Storages.MSSQL;
+using ZennoLab.Infrastructure;
+using System.Linq;
 
 namespace ZennoLab.Controllers
 {
     public class HomeController : Controller
     {
-        private readonly ILogger<HomeController> _logger;
         IWebHostEnvironment _appEnvironment;
-        private SqlContext db;
+        private IImageSetsRepository _imageSetsRepository;
 
-        public HomeController(ILogger<HomeController> logger, IWebHostEnvironment appEnvironment, SqlContext context)
+        public HomeController(IWebHostEnvironment appEnvironment, IImageSetsRepository imageSetsRepository)
         {
-            _logger = logger;
             _appEnvironment = appEnvironment;
-            db = context;
+            _imageSetsRepository = imageSetsRepository;
         }
 
         [HttpPost]
@@ -36,96 +35,15 @@ namespace ZennoLab.Controllers
 
             if (!Validator.TryValidateObject(viewModel, context, results, true))
             {
-                foreach (var error in results)
-                {
-                    viewModel.ValidationErrors.Add(error.ErrorMessage);
-                }
+                viewModel.ValidationErrors.AddRange(results.Select(error => error.ErrorMessage));
                 return RedirectToAction("Index", viewModel);
             }
 
-            if (!viewModel.IsCyrContains && !viewModel.IsLatContains && !viewModel.IsNumContains)
+            var path = UploadFile(viewModel.Archive);
+            if (string.IsNullOrEmpty(path))
             {
-                viewModel.ValidationErrors.Add("Нужно выбрать одно из: 'Содержит кириллицу', 'Содержит латиницу', 'Содержит цифры'");
+                viewModel.ValidationErrors.Add("Ошибка при загрузке файла");
                 return RedirectToAction("Index", viewModel);
-            }
-
-            if (viewModel.Archive == null)
-            {
-                viewModel.ValidationErrors.Add("Загрука файла обязательна");
-                return RedirectToAction("Index", viewModel);
-            }
-
-            var fileName = viewModel.Archive.FileName;
-            string fileExt = fileName.Substring(fileName.LastIndexOf('.'));
-            if (fileExt != ".zip")
-            {
-                viewModel.ValidationErrors.Add("Можно загрузить только zip архив");
-                return RedirectToAction("Index", viewModel);
-            }
-
-            var path = $"{_appEnvironment.WebRootPath}/files/{fileName}";
-            FileStream fileStream = new FileStream(path, FileMode.Create);
-            viewModel.Archive.CopyTo(fileStream);
-            fileStream.Close();
-
-            var reader = new ZipReader();
-            if (!reader.IsZipArchive(path))
-            {
-                viewModel.ValidationErrors.Add("Файл не является zip архивом");
-                return RedirectToAction("Index", viewModel);
-            }
-
-            var zipList = reader.GetFileList(path);
-            var imageCount = zipList.Count;
-            if (viewModel.AnswersLocation == "InDetachedFile") imageCount -= 1;
-
-            var minCount = 2000;
-            var maxCount = 3000;
-            if (viewModel.IsCyrContains) 
-            {
-                minCount += 3000;
-                maxCount += 3000;
-            }
-            if (viewModel.IsLatContains)
-            {
-                minCount += 3000;
-                maxCount += 3000;
-            }
-            if (viewModel.IsNumContains)
-            {
-                minCount += 3000;
-                maxCount += 3000;
-            }
-            if (viewModel.IsScharContains)
-            {
-                minCount += 3000;
-                maxCount += 3000;
-            }
-            if (viewModel.IsCaseSens)
-            {
-                minCount += 3000;
-                maxCount += 3000;
-            }
-            if (imageCount < minCount || imageCount > maxCount)
-            {
-                viewModel.ValidationErrors.Add($"При данных настройках архив может содержать от {minCount} до {maxCount} картинок");
-                return RedirectToAction("Index", viewModel);
-            }
-
-            if (viewModel.AnswersLocation == "InDetachedFile" && !zipList.Contains("answers.txt"))
-            {
-                viewModel.ValidationErrors.Add("В архиве отсутствует файл с ответами");
-                return RedirectToAction("Index", viewModel);
-            }
-
-            if (viewModel.AnswersLocation == "InDetachedFile")
-            {
-                var errorsList = reader.ValidateAnswersFile(path, imageCount);
-                if (errorsList.Count > 0)
-                {
-                    viewModel.ValidationErrors.AddRange(errorsList);
-                    return RedirectToAction("Index", viewModel);
-                }
             }
 
             var imageSet = new ImageSet
@@ -138,17 +56,25 @@ namespace ZennoLab.Controllers
                 IsCaseSens = viewModel.IsCaseSens,
                 AnswersLocation = viewModel.AnswersLocation,
                 ArchivePath = path,
-                CreateDate = DateTime.Now
             };
-            db.ImageSets.Add(imageSet);
-            await db.SaveChangesAsync();
+
+            var zipReader = new ZipReader(imageSet);
+
+            if (zipReader.ErrorsList.Any())
+            {
+                viewModel.ValidationErrors.AddRange(zipReader.ErrorsList);
+                return RedirectToAction("Index", viewModel);
+            }
+
+            imageSet.CreateDate = DateTime.Now;
+            await _imageSetsRepository.Insert(imageSet);
 
             return RedirectToAction("Index");
         }
 
         public async Task<IActionResult> Index(ImageSetViewModel viewModel)
         {
-            viewModel.AllSets = await db.ImageSets.ToListAsync();
+            viewModel.AllSets = await _imageSetsRepository.SelectAll();
             if (viewModel.ValidationErrors == null)
             {
                 viewModel.ValidationErrors = new List<string>();
@@ -165,6 +91,24 @@ namespace ZennoLab.Controllers
         public IActionResult Error()
         {
             return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+        }
+
+        private string UploadFile(IFormFile file)
+        {
+            try
+            {
+                var uploadDir = $"{_appEnvironment.WebRootPath}/files";
+                if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+                var path = $"{uploadDir}/{file.FileName}";
+                FileStream fileStream = new FileStream(path, FileMode.Create);
+                file.CopyTo(fileStream);
+                fileStream.Close();
+                return path;
+            }
+            catch 
+            {
+                return string.Empty;
+            }
         }
     }
 }
